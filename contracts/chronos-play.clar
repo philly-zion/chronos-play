@@ -374,3 +374,84 @@
     )
   )
 )
+
+;; ADMINISTRATIVE FUNCTIONS
+
+(define-public (create-gaming-tier
+    (name (string-ascii 64))
+    (cost-per-block uint)
+    (minimum-duration uint)
+    (maximum-duration uint)
+  )
+  (let ((new-tier-id (+ (var-get max-tier-id) u1)))
+    (asserts! (is-eq tx-sender (var-get game-master)) ERR_ACCESS_DENIED)
+
+    ;; Validate all inputs
+    (asserts! (> (len name) u0) ERR_INVALID_INPUT)
+    (asserts! (is-valid-cost-per-block cost-per-block) ERR_INVALID_INPUT)
+    (asserts! (is-valid-duration-range minimum-duration maximum-duration)
+      ERR_INVALID_INPUT
+    )
+    (asserts! (<= new-tier-id MAX_TIER_ID) ERR_INVALID_TIER)
+
+    ;; Create tier with validated inputs
+    (map-set gaming-tiers { tier-id: new-tier-id } {
+      name: name,
+      cost-per-block: cost-per-block,
+      minimum-duration: minimum-duration,
+      maximum-duration: maximum-duration,
+      active: true,
+    })
+
+    ;; Update max tier ID
+    (var-set max-tier-id new-tier-id)
+
+    (ok new-tier-id)
+  )
+)
+
+(define-public (update-gaming-tier
+    (tier-id uint)
+    (name (string-ascii 64))
+    (cost-per-block uint)
+    (minimum-duration uint)
+    (maximum-duration uint)
+    (active bool)
+  )
+  (begin
+    (asserts! (is-eq tx-sender (var-get game-master)) ERR_ACCESS_DENIED)
+
+    ;; Validate all inputs
+    (asserts! (is-valid-tier-id tier-id) ERR_INVALID_TIER)
+    (asserts! (is-some (map-get? gaming-tiers { tier-id: tier-id }))
+      ERR_INVALID_TIER
+    )
+    (asserts! (> (len name) u0) ERR_INVALID_INPUT)
+    (asserts! (is-valid-cost-per-block cost-per-block) ERR_INVALID_INPUT)
+    (asserts! (is-valid-duration-range minimum-duration maximum-duration)
+      ERR_INVALID_INPUT
+    )
+
+    ;; Update tier with validated inputs
+    (map-set gaming-tiers { tier-id: tier-id } {
+      name: name,
+      cost-per-block: cost-per-block,
+      minimum-duration: minimum-duration,
+      maximum-duration: maximum-duration,
+      active: active,
+    })
+
+    (ok true)
+  )
+)
+
+(define-public (transfer-realm-control (new-master principal))
+  (begin
+    (asserts! (is-eq tx-sender (var-get game-master)) ERR_ACCESS_DENIED)
+    ;; Validate that new-master is not the current master
+    (asserts! (not (is-eq new-master (var-get game-master))) ERR_INVALID_INPUT)
+    ;; Set new master with validated input
+    (var-set game-master new-master)
+    (ok true)
+  )
+)
