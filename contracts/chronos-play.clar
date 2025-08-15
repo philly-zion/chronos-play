@@ -186,3 +186,89 @@
     ;; Validate inputs
     (asserts! (is-valid-tier-id tier-id) ERR_INVALID_TIER)
     (asserts! (is-valid-duration play-blocks) ERR_INVALID_PLAY_DURATION)
+
+    (match (map-get? gaming-tiers { tier-id: tier-id })
+      tier (if (and
+          (>= play-blocks (get minimum-duration tier))
+          (<= play-blocks (get maximum-duration tier))
+          (get active tier)
+        )
+        ;; Use safe multiplication to prevent overflow
+        (safe-multiply (get cost-per-block tier) play-blocks)
+        ERR_INVALID_PLAY_DURATION
+      )
+      ERR_INVALID_TIER
+    )
+  )
+)
+
+(define-read-only (get-game-master)
+  (var-get game-master)
+)
+
+(define-read-only (get-max-tier-id)
+  (var-get max-tier-id)
+)
+
+;; PUBLIC FUNCTIONS - PLAYER OPERATIONS
+
+(define-public (join-realm
+    (tier-id uint)
+    (play-blocks uint)
+    (auto-renew bool)
+  )
+  (let (
+      (player tx-sender)
+      (current-block stacks-block-height)
+      (player-id (var-get next-player-id))
+    )
+    ;; Validate inputs first
+    (asserts! (is-valid-tier-id tier-id) ERR_INVALID_TIER)
+    (asserts! (is-valid-duration play-blocks) ERR_INVALID_PLAY_DURATION)
+
+    ;; Check if player already has an active subscription
+    (asserts! (not (is-subscription-valid player)) ERR_SUBSCRIPTION_ACTIVE)
+
+    ;; Validate tier exists and calculate cost
+    (match (calculate-subscription-cost tier-id play-blocks)
+      total-cost (let (
+        )
+        ;; Safe addition for end block calculation
+        (match (safe-add current-block play-blocks)
+          end-block (begin
+            ;; Create player profile with validated data
+            (map-set player-profiles { player: player } {
+              player-id: player-id,
+              tier-id: tier-id,
+              start-block: current-block,
+              end-block: end-block,
+              auto-renew: auto-renew,
+              total-spent: total-cost,
+            })
+
+            ;; Create subscription ledger entry with validated data
+            (map-set subscription-ledger { player-id: player-id } {
+              player: player,
+              tier-id: tier-id,
+              start-block: current-block,
+              end-block: end-block,
+              auto-renew: auto-renew,
+              total-spent: total-cost,
+              is-active: true,
+            })
+
+            ;; Increment player ID counter
+            (var-set next-player-id (+ player-id u1))
+
+            ;; Transfer subscription fee
+            (try! (stx-transfer? total-cost player (var-get game-master)))
+
+            (ok player-id)
+          )
+          overflow-err (err overflow-err)
+        )
+      )
+      cost-err (err cost-err)
+    )
+  )
+)
