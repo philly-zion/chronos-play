@@ -272,3 +272,105 @@
     )
   )
 )
+
+(define-public (extend-playtime (additional-blocks uint))
+  (let ((player tx-sender))
+    ;; Validate input
+    (asserts! (is-valid-duration additional-blocks) ERR_INVALID_PLAY_DURATION)
+
+    (match (map-get? player-profiles { player: player })
+      profile (let (
+          (tier-id (get tier-id profile))
+          (current-end (get end-block profile))
+        )
+        ;; Calculate additional cost with validated inputs
+        (match (calculate-subscription-cost tier-id additional-blocks)
+          additional-cost (begin
+            ;; Safe addition for new end block and total spent
+            (match (safe-add current-end additional-blocks)
+              new-end (match (safe-add (get total-spent profile) additional-cost)
+                new-total (begin
+                  ;; Update player profile
+                  (map-set player-profiles { player: player }
+                    (merge profile {
+                      end-block: new-end,
+                      total-spent: new-total,
+                    })
+                  )
+
+                  ;; Update subscription ledger
+                  (map-set subscription-ledger { player-id: (get player-id profile) }
+                    (merge
+                      (unwrap-panic (map-get? subscription-ledger { player-id: (get player-id profile) })) {
+                      end-block: new-end,
+                      total-spent: new-total,
+                    })
+                  )
+
+                  ;; Transfer additional cost
+                  (try! (stx-transfer? additional-cost player (var-get game-master)))
+
+                  (ok new-end)
+                )
+                overflow-err (err overflow-err)
+              )
+              overflow-err (err overflow-err)
+            )
+          )
+          cost-err (err cost-err)
+        )
+      )
+      ERR_NO_SUBSCRIPTION
+    )
+  )
+)
+
+(define-public (quit-realm)
+  (let ((player tx-sender))
+    (match (map-get? player-profiles { player: player })
+      profile (begin
+        ;; Mark subscription as inactive
+        (map-set subscription-ledger { player-id: (get player-id profile) }
+          (merge
+            (unwrap-panic (map-get? subscription-ledger { player-id: (get player-id profile) })) {
+            is-active: false,
+            auto-renew: false,
+          })
+        )
+
+        ;; Update player profile
+        (map-set player-profiles { player: player }
+          (merge profile {
+            auto-renew: false,
+            end-block: stacks-block-height, ;; End immediately
+          })
+        )
+
+        (ok true)
+      )
+      ERR_NO_SUBSCRIPTION
+    )
+  )
+)
+
+(define-public (toggle-auto-renew)
+  (let ((player tx-sender))
+    (match (map-get? player-profiles { player: player })
+      profile (let ((new-auto-renew (not (get auto-renew profile))))
+        ;; Update player profile
+        (map-set player-profiles { player: player }
+          (merge profile { auto-renew: new-auto-renew })
+        )
+
+        ;; Update subscription ledger
+        (map-set subscription-ledger { player-id: (get player-id profile) }
+          (merge
+            (unwrap-panic (map-get? subscription-ledger { player-id: (get player-id profile) })) { auto-renew: new-auto-renew }
+          ))
+
+        (ok new-auto-renew)
+      )
+      ERR_NO_SUBSCRIPTION
+    )
+  )
+)
