@@ -90,3 +90,99 @@
   maximum-duration: u52560,
   active: true,
 })
+
+;; VALIDATION HELPER FUNCTIONS
+
+(define-private (is-valid-tier-id (tier-id uint))
+  (and (> tier-id u0) (<= tier-id MAX_TIER_ID))
+)
+
+(define-private (is-valid-cost-per-block (cost uint))
+  (and (>= cost MIN_COST_PER_BLOCK) (<= cost MAX_COST_PER_BLOCK))
+)
+
+(define-private (is-valid-duration (duration uint))
+  (and (> duration u0) (<= duration MAX_DURATION))
+)
+
+(define-private (is-valid-duration-range
+    (min-duration uint)
+    (max-duration uint)
+  )
+  (and
+    (is-valid-duration min-duration)
+    (is-valid-duration max-duration)
+    (<= min-duration max-duration)
+  )
+)
+
+(define-private (safe-multiply
+    (a uint)
+    (b uint)
+  )
+  (let ((result (* a b)))
+    (if (and (> a u0) (> b u0))
+      ;; Check for overflow: if a * b / a != b, then overflow occurred
+      (if (is-eq (/ result a) b)
+        (ok result)
+        ERR_OVERFLOW
+      )
+      (ok result)
+    )
+  )
+)
+
+(define-private (safe-add
+    (a uint)
+    (b uint)
+  )
+  (let ((result (+ a b)))
+    (if (>= result a)
+      (ok result)
+      ERR_OVERFLOW
+    )
+  )
+)
+
+;; READ-ONLY FUNCTIONS
+
+(define-read-only (get-gaming-tier (tier-id uint))
+  (if (is-valid-tier-id tier-id)
+    (map-get? gaming-tiers { tier-id: tier-id })
+    none
+  )
+)
+
+(define-read-only (get-player-profile (player principal))
+  (map-get? player-profiles { player: player })
+)
+
+(define-read-only (get-subscription-by-id (player-id uint))
+  (map-get? subscription-ledger { player-id: player-id })
+)
+
+(define-read-only (is-subscription-valid (player principal))
+  (match (map-get? player-profiles { player: player })
+    profile (>= (get end-block profile) stacks-block-height)
+    false
+  )
+)
+
+(define-read-only (get-play-blocks-remaining (player principal))
+  (match (map-get? player-profiles { player: player })
+    profile (if (>= (get end-block profile) stacks-block-height)
+      (some (- (get end-block profile) stacks-block-height))
+      (some u0)
+    )
+    none
+  )
+)
+
+(define-read-only (calculate-subscription-cost
+    (tier-id uint)
+    (play-blocks uint)
+  )
+  (begin
+    ;; Validate inputs
+    (asserts! (is-valid-tier-id tier-id) ERR_INVALID_TIER)
+    (asserts! (is-valid-duration play-blocks) ERR_INVALID_PLAY_DURATION)
